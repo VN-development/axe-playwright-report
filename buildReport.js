@@ -2,7 +2,6 @@
 
 const fs = require('fs');
 const path = require("path");
-const URL = require('url').URL;
 require('dotenv').config({path: path.join(process.cwd(), '.env.a11y')});
 
 const BASE_DIR = process.env.OUTPUT_DIR || './axe-playwright-report'
@@ -132,7 +131,7 @@ function generateBaseContent(template, report) {
         <div id="breadcrumb-container">
             <ul class="breadcrumb">
                 <li><a href="../index.html" title="Dashboard">Dashboard</a></li>
-                <li id="report-breadcrumb">${report.id}</li>
+                <li id="report-breadcrumb">${report.name || report.id}</li>
             </ul>
         </div>
     </nav>
@@ -825,7 +824,7 @@ function generateTableCards(reports) {
         });
         return {
             id: report.id,
-            pagePath: report.pagePath || report.id,
+            pagePath: report.name || report.pagePath || report.id,
             critical_elements,
             serious_elements,
             moderate_elements,
@@ -1211,8 +1210,7 @@ function generateReport() {
         baseContent = baseContent.replace("./main.js", "../main.js");
         baseContent = baseContent.replace("./styles.css", "../styles.css");
 
-        const id = report.id || normalizePath(report.url)
-        fs.writeFileSync(getOutputPath(PAGES_DIR, id + ".html"), baseContent, 'utf8');
+        fs.writeFileSync(getOutputPath(PAGES_DIR, report.id + ".html"), baseContent, 'utf8');
     });
 }
 
@@ -1558,24 +1556,6 @@ function test(allowFailure = false, delayTermination = false) {
         logs.push(`${colors.green}\nNo blocking accessibility issues. Proceeding...${colors.reset}\n`);
     }
     return fail
-}
-
-function normalizePath(url) {
-    const urlObj = new URL(url, "http://dummy.base");
-
-    const path = urlObj.pathname
-        .split("/")
-        .filter(Boolean)
-        .map(segment => {
-            if (/^\d+$/.test(segment)) return "id";
-            if (/^[a-f0-9-]{36}$/i.test(segment)) return "uuid";
-            if (/^[a-f0-9]{8,}$/i.test(segment)) return "hash";
-            if (segment.endsWith(".html")) return segment.replace(".html", "");
-            return segment;
-        })
-        .join("_");
-
-    return path || "root";
 }
 
 
