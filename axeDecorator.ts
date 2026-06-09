@@ -65,7 +65,7 @@ export function axeScan<This, Args extends any[], Return>(decoratorConfig?: Part
     }
 }
 
-export async function axeScanRaw(page: Page | (() => Page), config?: any): Promise<void> {
+export async function axeScanRaw(page: Page | (() => Page), config?: Partial<AxeScanAccessibilityConfig>): Promise<void> {
     let accessibilityConfig = await loadEnvConfigCached()
     if (config) {
         accessibilityConfig = {
@@ -84,7 +84,7 @@ export async function axeScanRaw(page: Page | (() => Page), config?: any): Promi
 
         let axeBuilder = new AxeBuilder({page});
 
-        if (accessibilityConfig.options) axeBuilder.options(accessibilityConfig.options);
+        if (accessibilityConfig.options) axeBuilder.options({...accessibilityConfig.options});
         if (accessibilityConfig.tags.length > 0) axeBuilder.withTags(accessibilityConfig.tags);
         if (accessibilityConfig.withRules.length > 0) axeBuilder.withRules(accessibilityConfig.withRules);
         if (accessibilityConfig.excludeRules.length > 0) axeBuilder.disableRules(accessibilityConfig.excludeRules);
