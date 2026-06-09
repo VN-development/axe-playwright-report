@@ -5,7 +5,8 @@
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./axeBuildReport": "./dist/axeBuildReport.js"
+    "./axeBuildReport": "./dist/axeBuildReport.js",
+    "./axeDecorator": "./dist/axeDecorator.js"
   },
   "types": "dist/index.d.ts",
   "bin": {
