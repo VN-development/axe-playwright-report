@@ -17,16 +17,6 @@
     "build-report": "build-report",
     "test": "echo \"No tests yet\" && exit 0"
   },
-  "files": [
-    "dist",
-    "README.md",
-    "buildReport.js",
-    "LICENSE",
-    "disabilityAffectedData",
-    "styles.css",
-    "main.js",
-    "index.template.html"
-  ],
   "keywords": [
     "accessibility",
     "axe-core",
