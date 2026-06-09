@@ -1,7 +1,23 @@
 import {Locator, Page} from '@playwright/test';
 import AxeBuilder from "@axe-core/playwright";
 import {randomUUID} from 'crypto';
-import fs from 'fs';
+import fs from 'fs/promises';
+import {RunOptions} from "axe-core";
+
+export interface AxeScanAccessibilityConfig {
+    id?: string;
+    name?: string;
+    options?: RunOptions | null;
+    scan: boolean;
+    outputDir: string;
+    screenshots: boolean;
+    tags: string[];
+    withRules: string[];
+    excludeRules: string[];
+    include: string[];
+    exclude: string[];
+    customRegExp: RegExp[];
+}
 
 /**
  * A decorator that runs an accessibility scan using Axe after executing the decorated method.
@@ -17,7 +33,7 @@ import fs from 'fs';
  * @template Args - The type of arguments the decorated method takes.
  * @template Return - The return type of the decorated method.
  *
- * @param target - The method to be decorated. This method will be wrapped so that the Axe accessibility scan runs after it.
+ * @param decoratorConfig - A decorator configuration.
  *
  * @returns A new function that runs the accessibility scan after executing the original method.
  * It returns a `Promise` that resolves to the return value of the original method.
@@ -27,73 +43,98 @@ import fs from 'fs';
  *   async someMethod() {
  *     this.page.getByText('Hello World').click();
  *   }
- * }
  */
-export function axeScan<This, Args extends any[], Return>() {
+export function axeScan<This, Args extends any[], Return>(decoratorConfig?: Partial<{
+    pageProperty: string;
+    accessibilityConfig: Partial<AxeScanAccessibilityConfig>;
+}>) {
     return function actualDecorator(target: (this: This, ...args: Args) => Promise<Return>) {
-        async function scan(this: any, ...args: Args): Promise<Return> {
+        return async function scan(this: any, ...args: Args): Promise<Return> {
             const result = await target.apply(this, args);
-            const accessibilityConfig = loadEnvConfig()
 
-            if (accessibilityConfig.scan) {
-                const page: Page | undefined = Object.values(this).find((prop): prop is Page => prop?.constructor?.name === 'Page');
-
+            await axeScanRaw(() => {
+                const page: Page = decoratorConfig?.pageProperty ? this[decoratorConfig?.pageProperty] : Object.values(this).find((prop): prop is Page => prop?.constructor?.name === 'Page');
                 if (!page) {
                     console.warn(`Page not found in context in args [${Object.values(this)}].\n(Make sure you are using the decorator on a method that has access to the Playwright Page);\nSkipping axe scan.\n`);
-                    return result;
                 }
+                return page;
+            }, decoratorConfig?.accessibilityConfig);
 
-                let axeBuilder = new AxeBuilder({page});
-                console.log(accessibilityConfig.withRules)
-                if (accessibilityConfig.tags.length > 0) axeBuilder.withTags(accessibilityConfig.tags);
-                if (accessibilityConfig.withRules.length > 0) axeBuilder.withRules(accessibilityConfig.withRules);
-                if (accessibilityConfig.excludeRules.length > 0) axeBuilder.disableRules(accessibilityConfig.excludeRules);
-                if (accessibilityConfig.exclude.length > 0) {
-                    accessibilityConfig.exclude.forEach(locator  => axeBuilder.exclude(locator));
-                }
-                if (accessibilityConfig.include.length > 0) {
-                    accessibilityConfig.include.forEach(locator  => axeBuilder.include(locator));
-                }
-
-                const accessibilityScanResults = await axeBuilder.analyze();
-
-                const id = randomUUID() + new Date().getTime().toString().slice(-4);
-                accessibilityScanResults['id'] = id;
-
-                let url = normalizeUrl(accessibilityScanResults.url, accessibilityConfig.customRegExp);
-                accessibilityScanResults['newUrl'] = url;
-                accessibilityScanResults['pagePath'] = url.replace(process.env.URL ?? "", "");
-                const violations = accessibilityScanResults.violations;
-                const incomplete = accessibilityScanResults.incomplete;
-
-                if (violations.length > 0 || incomplete.length > 0 || accessibilityScanResults.passes.length) {
-                    accessibilityScanResults['path'] = formatUrl(url);
-                    accessibilityScanResults['violationsScreenShot'] = `${id}_violations.png`;
-                    accessibilityScanResults['incompleteScreenShot'] = `${id}_incomplete.png`;
-                    accessibilityScanResults['inapplicableScreenShot'] = `${id}_inapplicable.png`;
-
-                    if (!fs.existsSync(accessibilityConfig.outputDir)) {
-                        fs.mkdirSync(accessibilityConfig.outputDir, {recursive: true});
-                    }
-
-                    fs.writeFileSync(`${accessibilityConfig.outputDir}/${accessibilityScanResults['id']}.json`, JSON.stringify(accessibilityScanResults, null, 2));
-
-                    if (accessibilityConfig.screenshots) {
-                        await highlightEachIssuesAndSaveScreenshot(violations, page, "red", id + "_violations", accessibilityConfig.outputDir);
-                        await highlightEachIssuesAndSaveScreenshot(incomplete, page, "red", id + "_incomplete", accessibilityConfig.outputDir);
-                    }
-                }
-            }
             return result
         }
-
-        return scan as (this: This, ...args: Args) => Promise<Return>;
     }
 }
 
-function formatUrl(inputUrl: string): string {
-    const relativePath = inputUrl.replace(process.env.URL ?? "", "");
-    const path = relativePath.replace(/[^a-zA-Z0-9]/g, "-").replace(/^-+|-+$/g, "");
+export async function axeScanRaw(page: Page | (() => Page), config?: any): Promise<void> {
+    let accessibilityConfig = await loadEnvConfigCached()
+    if (config) {
+        accessibilityConfig = {
+            ...accessibilityConfig,
+            ...config,
+        };
+    }
+
+    if (accessibilityConfig.scan) {
+        if (typeof page === 'function') {
+            page = page();
+        }
+        if (!page) {
+            return;
+        }
+
+        let axeBuilder = new AxeBuilder({page});
+
+        if (accessibilityConfig.options) axeBuilder.options(accessibilityConfig.options);
+        if (accessibilityConfig.tags.length > 0) axeBuilder.withTags(accessibilityConfig.tags);
+        if (accessibilityConfig.withRules.length > 0) axeBuilder.withRules(accessibilityConfig.withRules);
+        if (accessibilityConfig.excludeRules.length > 0) axeBuilder.disableRules(accessibilityConfig.excludeRules);
+        if (accessibilityConfig.exclude.length > 0) {
+            accessibilityConfig.exclude.forEach(locator  => axeBuilder.exclude(locator));
+        }
+        if (accessibilityConfig.include.length > 0) {
+            accessibilityConfig.include.forEach(locator  => axeBuilder.include(locator));
+        }
+
+        const accessibilityScanResults = await axeBuilder.analyze();
+
+        const id = accessibilityConfig.id || (randomUUID() + '_' + new Date().getTime().toString().slice(-4));
+        accessibilityScanResults['id'] = id;
+        accessibilityScanResults['name'] = accessibilityConfig.name || id;
+
+        const url = normalizeUrl(accessibilityScanResults.url, accessibilityConfig.customRegExp);
+        const relativeUrl = url.replace(process.env.URL ?? "", "");
+        accessibilityScanResults['newUrl'] = url;
+        accessibilityScanResults['pagePath'] = relativeUrl;
+        const violations = accessibilityScanResults.violations;
+        const incomplete = accessibilityScanResults.incomplete;
+
+        if (violations.length > 0 || incomplete.length > 0 || accessibilityScanResults.passes.length) {
+            accessibilityScanResults['path'] = formatUrl(relativeUrl);
+            accessibilityScanResults['violationsScreenShot'] = `${id}_violations.png`;
+            accessibilityScanResults['incompleteScreenShot'] = `${id}_incomplete.png`;
+            accessibilityScanResults['inapplicableScreenShot'] = `${id}_inapplicable.png`;
+
+            await prepareDirCached(accessibilityConfig.outputDir);
+
+            await fs.writeFile(`${accessibilityConfig.outputDir}/${accessibilityScanResults['id']}.json`, JSON.stringify(accessibilityScanResults, null, 2));
+
+            if (accessibilityConfig.screenshots) {
+                await highlightEachIssuesAndSaveScreenshot(violations, page, "red", id + "_violations", accessibilityConfig.outputDir);
+                await highlightEachIssuesAndSaveScreenshot(incomplete, page, "red", id + "_incomplete", accessibilityConfig.outputDir);
+            }
+        }
+    }
+}
+
+async function prepareDir(dirname: string): Promise<void> {
+    const isExists = await fileExists(dirname);
+    if (!isExists) {
+        await fs.mkdir(dirname, {recursive: true});
+    }
+}
+
+function formatUrl(relativeUrl: string): string {
+    const path = relativeUrl.replace(/[^a-zA-Z0-9]/g, "-").replace(/^-+|-+$/g, "");
     return path.startsWith("/") ? path : `/${path}`;
 }
 
@@ -109,7 +150,10 @@ async function highlightEachIssuesAndSaveScreenshot(issues: any[], page: Page, c
             }
         }
 
-        await page.screenshot({path: `${outputDir}/${fileName}_${i + 1}.png`});
+        await page.screenshot({
+            path: `${outputDir}/${fileName}_${i + 1}.png`,
+            fullPage: true,
+        });
 
         // Delete all highlighted elements for the current issue
         for (let j = 0; j < issues[i].nodes.length; j++) {
@@ -131,7 +175,17 @@ async function highlightEachIssuesAndSaveScreenshot(issues: any[], page: Page, c
     }
 }
 
-function loadEnvConfig(envPath: string = ".env.a11y") {
+async function fileExists(path: string): Promise<boolean> {
+    try {
+        await fs.access(path, fs.constants.F_OK);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+
+async function loadEnvConfig(envPath: string = ".env.a11y"): Promise<AxeScanAccessibilityConfig> {
     const defaultConfig = {
         scan: true,
         outputDir: "axe-playwright-report/pages",
@@ -144,9 +198,11 @@ function loadEnvConfig(envPath: string = ".env.a11y") {
         customRegExp: [] as RegExp[],
     };
 
-    if (!fs.existsSync(envPath)) return defaultConfig;
+    const envPathExists = await fileExists(envPath);
 
-    const content = fs.readFileSync(envPath, "utf-8");
+    if (!envPathExists) return defaultConfig;
+
+    const content = await fs.readFile(envPath, "utf-8");
     const env: Record<string, string> = {};
 
     for (const line of content.split("\n")) {
@@ -264,3 +320,22 @@ function normalizeUrl(url, customPatterns: RegExp[] = []) {
         return "/" + normalizedPath + normalizedSearch;
     }
 }
+
+const memoizeCache = new Map();
+
+function memoize<T extends (...args: any[]) => any>(fn: T): T {
+    return ((...args: any[]) => {
+        const key = JSON.stringify(args);
+
+        if (memoizeCache.has(key)) {
+            return memoizeCache.get(key);
+        }
+
+        const result = fn.apply(null, args);
+        memoizeCache.set(key, result);
+        return result;
+    }) as T;
+}
+
+const loadEnvConfigCached = memoize(loadEnvConfig);
+const prepareDirCached = memoize(prepareDir);
