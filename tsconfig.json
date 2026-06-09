@@ -9,7 +9,8 @@
     "strict": true,
     "moduleResolution": "node",
     "types": ["node"],
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "ignoreDeprecations": "6.0"
   },
   "include": ["axeDecorator.ts", "index.ts",
     "axeBuildReport.ts"
