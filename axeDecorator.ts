@@ -4,6 +4,8 @@ import {randomUUID} from 'crypto';
 import fs from 'fs/promises';
 import {RunOptions} from "axe-core";
 
+const styleBackupAttribute = 'x-axe-playwright-report-style-bkp';
+
 export interface AxeScanAccessibilityConfig {
     id?: string;
     name?: string;
@@ -176,14 +178,7 @@ async function highlightEachIssuesAndSaveScreenshot(issues: any[], page: Page, c
             for (let k = 0; k < issues[i].nodes[j].target.length; k++) {
                 try {
                     const element = (await page.locator(<string>issues[i].nodes[j].target[k]).all())[0]
-                    await element.evaluate((el) => {
-                        el.style.outline = "none";
-                        const marker = el.querySelector(`[id^="marker-"]`);
-                        if (marker) {
-                            marker.textContent = "";
-                            marker.remove();
-                        }
-                    }, {timeout: 250});
+                    await removeElementHighlight(element);
                 } catch (ignore: any) {
                 }
             }
@@ -262,9 +257,14 @@ async function loadEnvConfig(envPath: string = ".env.a11y"): Promise<AxeScanAcce
 async function highlightElement(element: Locator, index: number, color: string) {
     try {
         await element.evaluate((el, args) => {
+            const style = {
+                position: el.style.position,
+                outline: el.style.outline,
+            };
             el.scrollIntoView({behavior: "auto", block: "center"});
             el.style.position = "relative"; // Ensure proper placement
             el.style.outline = `2px solid ${args.color}`; // Highlight border with given color
+            el.setAttribute(args.styleBackupAttribute, JSON.stringify(style));
 
             // Create a marker div
             const marker = document.createElement("div");
@@ -288,7 +288,24 @@ async function highlightElement(element: Locator, index: number, color: string) 
             marker.style.borderRadius = "50%"; // Make it circular
 
             el.appendChild(marker);
-        }, {index, color}, {timeout: 250});
+        }, {index, color, styleBackupAttribute}, {timeout: 250});
+    } catch (ignore: any) {
+    }
+}
+
+async function removeElementHighlight(element: Locator) {
+    try {
+        await element.evaluate((el, args) => {
+            const style = JSON.parse(el.getAttribute(args.styleBackupAttribute) || '{}');
+            el.style.position = style.position;
+            el.style.outline = style.outline;
+            el.removeAttribute(args.styleBackupAttribute);
+            const marker = el.querySelector(`[id^="marker-"]`);
+            if (marker) {
+                marker.textContent = "";
+                marker.remove();
+            }
+        }, {styleBackupAttribute}, {timeout: 250});
     } catch (ignore: any) {
     }
 }
