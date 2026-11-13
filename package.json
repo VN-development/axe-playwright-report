@@ -16,7 +16,8 @@
     "build": "tsc && cp buildReport.js dist/",
     "prepublishOnly": "npm run build",
     "build-report": "build-report",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "echo \"No tests yet\" && exit 0",
+    "prepare": "npm run build"
   },
   "keywords": [
     "accessibility",
